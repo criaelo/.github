@@ -1,0 +1,27 @@
+name: Reusable - Node Validate
+
+# Validação padrão de um serviço Node standalone (lint + typecheck + test).
+# Uso no repo consumidor:
+#   jobs:
+#     validate:
+#       uses: criaelo/.github/.github/workflows/node-validate.yml@main
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: "22"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
