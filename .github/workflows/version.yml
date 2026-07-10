@@ -1,0 +1,100 @@
+name: Reusable - Version (SemVer + tag + Release)
+
+# Calcula a proxima versao SemVer por Conventional Commits desde a ultima tag
+# vX.Y.Z, cria a tag + GitHub Release no repo chamador e expoe new_tag/new_version.
+#
+# Uso no repo consumidor (ci-prd.yml):
+#   jobs:
+#     version:
+#       uses: criaelo/.github/.github/workflows/version.yml@main
+#       permissions: { contents: write }   # obrigatorio no caller
+#     build-push:
+#       needs: version
+#       if: needs.version.outputs.new_tag != ''
+#
+# Gate de release: quando nao ha commit release-worthy (feat/fix/perf/BREAKING)
+# desde a ultima tag, new_tag sai vazio => o consumidor skipa build/deploy.
+# Padrao: criaelo/wiki -> docs/operations/padrao-ci-por-ambiente.md
+on:
+  workflow_call:
+    inputs:
+      fallback-version:
+        description: Baseline usado quando nao ha tags anteriores nem package.json.
+        type: string
+        default: "0.1.0"
+    outputs:
+      new_tag:
+        description: Nova tag vX.Y.Z (vazio se nada release-worthy).
+        value: ${{ jobs.version.outputs.new_tag }}
+      new_version:
+        description: Nova versao X.Y.Z (vazio se nada release-worthy).
+        value: ${{ jobs.version.outputs.new_version }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    outputs:
+      new_tag: ${{ steps.version.outputs.new_tag }}
+      new_version: ${{ steps.version.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Bump semantico + tag vX.Y.Z + GitHub Release
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FALLBACK_VERSION: ${{ inputs.fallback-version }}
+        run: |
+          set -euo pipefail
+          # Historico completo: sem isso, o checkout num push de merge commit nao
+          # popula as side-branches e `git log <tag>..HEAD` nao enxerga commits
+          # trazidos via merge => version job cego => sem bump => sem release.
+          git fetch --unshallow origin 2>/dev/null || git fetch origin --prune --no-tags
+          git fetch --tags --force
+          LAST_TAG=$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+
+          if [ -z "$LAST_TAG" ]; then
+            NEW_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "$FALLBACK_VERSION")
+            echo "Sem tags anteriores - baseline inicial v${NEW_VERSION}."
+          else
+            RANGE="${LAST_TAG}..HEAD"
+            BUMP="none"
+            if git log --format='%B' "$RANGE" | grep -qiE '(^[a-z]+(\(.+\))?!:|BREAKING[ -]CHANGE)'; then
+              BUMP="major"
+            elif git log --format='%s' "$RANGE" | grep -qiE '^feat(\(.+\))?:'; then
+              BUMP="minor"
+            elif git log --format='%s' "$RANGE" | grep -qiE '^(fix|perf|hotfix)(\(.+\))?:'; then
+              BUMP="patch"
+            fi
+
+            IFS=. read -r MAJOR MINOR PATCH <<< "${LAST_TAG#v}"
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH+1)) ;;
+              none)
+                echo "Nenhum commit release-worthy (feat/fix/perf/BREAKING) desde ${LAST_TAG}; sem nova tag."
+                echo "new_tag=" >> "$GITHUB_OUTPUT"
+                echo "new_version=" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          NEW_TAG="v${NEW_VERSION}"
+          echo "new_tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+          NOTES=(--generate-notes)
+          if git rev-parse --verify --quiet "$LAST_TAG" >/dev/null; then
+            NOTES+=(--notes-start-tag "$LAST_TAG")
+          fi
+          if ! gh release view "$NEW_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$NEW_TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "$NEW_TAG" "${NOTES[@]}"
+            echo "Release ${NEW_TAG} criada."
+          else
+            echo "Release ${NEW_TAG} ja existia."
+          fi
