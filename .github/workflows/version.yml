@@ -45,6 +45,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      - name: Install GitHub CLI
+        run: |
+          if ! command -v gh &>/dev/null; then
+            type -p curl >/dev/null || sudo apt-get install -qq -y curl
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update -qq && sudo apt install -qq -y gh
+          fi
       - name: Bump semantico + tag vX.Y.Z + GitHub Release
         id: version
         env:
