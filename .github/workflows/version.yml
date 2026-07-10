@@ -20,7 +20,7 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: Runner (runs-on) do job. Ex.: ubuntu-latest ou criaelo-ci.
+        description: "Runner (runs-on) do job. Ex.: ubuntu-latest ou criaelo-ci."
         type: string
         default: ubuntu-latest
       fallback-version:
@@ -97,8 +97,7 @@ jobs:
             NOTES+=(--notes-start-tag "$LAST_TAG")
           fi
           if ! gh release view "$NEW_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$NEW_TAG" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "$NEW_TAG" "${NOTES[@]}"
+            gh release create "$NEW_TAG" --repo "$GITHUB_REPOSITORY"               --target "$GITHUB_SHA" --title "$NEW_TAG" "${NOTES[@]}"
             echo "Release ${NEW_TAG} criada."
           else
             echo "Release ${NEW_TAG} ja existia."
