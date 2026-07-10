@@ -8,6 +8,7 @@ name: Reusable - Version (SemVer + tag + Release)
 #     version:
 #       uses: criaelo/.github/.github/workflows/version.yml@main
 #       permissions: { contents: write }   # obrigatorio no caller
+#       with: { runner: criaelo-ci }        # opcional (default ubuntu-latest)
 #     build-push:
 #       needs: version
 #       if: needs.version.outputs.new_tag != ''
@@ -18,6 +19,10 @@ name: Reusable - Version (SemVer + tag + Release)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: Runner (runs-on) do job. Ex.: ubuntu-latest ou criaelo-ci.
+        type: string
+        default: ubuntu-latest
       fallback-version:
         description: Baseline usado quando nao ha tags anteriores nem package.json.
         type: string
@@ -32,7 +37,7 @@ on:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions: { contents: write }
     outputs:
       new_tag: ${{ steps.version.outputs.new_tag }}
