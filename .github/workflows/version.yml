@@ -43,7 +43,7 @@ jobs:
       new_tag: ${{ steps.version.outputs.new_tag }}
       new_version: ${{ steps.version.outputs.new_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - name: Install GitHub CLI
         run: |
