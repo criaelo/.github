@@ -10,14 +10,14 @@ on:
     inputs:
       node-version:
         type: string
-        default: "22"
+        default: "24"
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
           cache: npm
