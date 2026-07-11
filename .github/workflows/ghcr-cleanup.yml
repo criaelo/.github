@@ -1,0 +1,70 @@
+name: GHCR cleanup
+
+# Higiene semanal de imagens antigas no GHCR (pins <env>-<sha> acumulados pelo CI).
+# Seguranca:
+#   - schedule roda SEMPRE em dry-run (nunca deleta); apenas relata no summary.
+#   - delecao real so via dispatch manual com dry_run=false.
+#   - nunca remove tag em uso nos manifests de criaelo/deploy, tags moveis
+#     (dev/hml/prd/latest/main), caches (buildcache) nem releases (vX.Y.Z).
+#   - preserva as N versoes mais recentes por pacote (janela de rollback).
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # segunda 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Somente listar (true) ou efetivar delecoes (false)'
+        type: boolean
+        default: true
+      keep:
+        description: 'Versoes mais recentes a preservar por pacote'
+        type: string
+        default: '10'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcr-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifica GHCR_CLEANUP_TOKEN
+        env: { TOKEN: '${{ secrets.GHCR_CLEANUP_TOKEN }}' }
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Secret GHCR_CLEANUP_TOKEN ausente. Crie um PAT com read:packages,delete:packages e repo (read em criaelo/deploy) e rode: gh secret set GHCR_CLEANUP_TOKEN --org criaelo --repos .github"
+            exit 1
+          fi
+
+      - name: Checkout .github (script)
+        uses: actions/checkout@v5
+
+      - name: Checkout criaelo/deploy (tags em uso)
+        uses: actions/checkout@v5
+        with:
+          repository: criaelo/deploy
+          token: '${{ secrets.GHCR_CLEANUP_TOKEN }}'
+          ref: main
+          path: deploy
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Higiene GHCR
+        env:
+          GH_TOKEN: '${{ secrets.GHCR_CLEANUP_TOKEN }}'
+        run: |
+          set -euo pipefail
+          DRY="${{ github.event_name == 'schedule' && 'true' || inputs.dry_run }}"
+          KEEP="${{ inputs.keep || '10' }}"
+          ARGS=(--org criaelo --deploy-dir ./deploy --keep "$KEEP")
+          if [ "$DRY" != "true" ]; then ARGS+=(--apply); fi
+          echo "Modo: $([ "$DRY" = "true" ] && echo 'dry-run (sem delecao)' || echo 'APLICANDO delecoes') | keep=$KEEP" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ghcr-cleanup.py "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
