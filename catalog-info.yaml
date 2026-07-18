@@ -1,0 +1,37 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: github-workflows
+  title: Criaelo GitHub Workflows
+  description: Biblioteca organizacional de workflows reutilizáveis para validação, versionamento SemVer, publicação de imagens e higiene do GHCR.
+  annotations:
+    github.com/project-slug: criaelo/.github
+  links:
+    - url: https://github.com/criaelo/.github
+      title: Repositório
+      icon: github
+    - url: https://github.com/criaelo/.github/actions
+      title: Execuções organizacionais
+      icon: github
+    - url: https://github.com/criaelo/.github/blob/main/.github/workflows/version.yml
+      title: Versionamento reutilizável
+      icon: github
+    - url: https://github.com/criaelo/.github/blob/main/.github/workflows/node-validate.yml
+      title: Validação Node reutilizável
+      icon: github
+    - url: https://github.com/criaelo/.github/blob/main/.github/workflows/ghcr-cleanup.yml
+      title: Higiene do GHCR
+      icon: github
+    - url: https://wiki.criaelo.com/operations/padrao-ci-por-ambiente/
+      title: Padrão de CI
+      icon: docs
+  tags:
+    - automation
+    - ci
+    - github-actions
+    - library
+spec:
+  type: library
+  lifecycle: production
+  owner: group:default/platform
+  system: system:default/criaelo-platform
