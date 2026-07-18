@@ -35,3 +35,32 @@ spec:
   lifecycle: production
   owner: group:default/platform
   system: system:default/criaelo-platform
+  dependsOn:
+    - resource:default/criaelo-ghcr
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: criaelo-ghcr
+  title: Criaelo Container Registry
+  description: Registry organizacional das imagens OCI publicadas em ghcr.io/criaelo e consumidas pelos workloads DEV, HML e PRD.
+  annotations:
+    github.com/project-slug: criaelo/.github
+  links:
+    - url: https://github.com/orgs/criaelo/packages
+      title: Pacotes da organização
+      icon: package
+    - url: https://github.com/criaelo/.github/blob/main/.github/workflows/ghcr-cleanup.yml
+      title: Workflow de higiene do registry
+      icon: github
+    - url: https://wiki.criaelo.com/operations/padrao-ci-por-ambiente/
+      title: Padrão de publicação de imagens
+      icon: docs
+  tags:
+    - container-registry
+    - ghcr
+    - oci
+spec:
+  type: container-registry
+  owner: group:default/platform
+  system: system:default/criaelo-platform
