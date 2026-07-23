@@ -60,11 +60,11 @@ jobs:
           FALLBACK_VERSION: ${{ inputs.fallback-version }}
         run: |
           set -euo pipefail
-          # Historico completo: sem isso, o checkout num push de merge commit nao
-          # popula as side-branches e `git log <tag>..HEAD` nao enxerga commits
-          # trazidos via merge => version job cego => sem bump => sem release.
-          git fetch --unshallow origin 2>/dev/null || git fetch origin --prune --no-tags
-          git fetch --tags --force
+          # Historico completo e robusto: garante que `git log <tag>..HEAD` enxergue
+          # todos os commits (inclusive os trazidos por merge), independentemente de
+          # o checkout ter vindo raso. Fetch de todos os heads + tags e unshallow.
+          git fetch --prune --force --tags origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null || true
+          git fetch --unshallow origin 2>/dev/null || true
           LAST_TAG=$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
 
           if [ -z "$LAST_TAG" ]; then
@@ -72,14 +72,23 @@ jobs:
             echo "Sem tags anteriores - baseline inicial v${NEW_VERSION}."
           else
             RANGE="${LAST_TAG}..HEAD"
+            # Coleta subjects/bodies em variaveis ANTES de filtrar. Evita o padrao
+            # `git log | grep -q`, cujo fechamento antecipado do pipe pelo grep (que
+            # sai no 1o match) enviava SIGPIPE ao git log; com `pipefail`, o pipeline
+            # retornava != 0 e o teste era tratado como falso MESMO havendo commits
+            # release-worthy => version job cego em ranges grandes.
+            SUBJECTS=$(git log --format='%s' "$RANGE" 2>/dev/null || true)
+            BODIES=$(git log --format='%B' "$RANGE" 2>/dev/null || true)
+            RANGE_COUNT=$(git rev-list --count "$RANGE" 2>/dev/null || echo '?')
             BUMP="none"
-            if git log --format='%B' "$RANGE" | grep -qiE '(^[a-z]+(\(.+\))?!:|BREAKING[ -]CHANGE)'; then
+            if grep -qiE '(^[a-z]+(\(.+\))?!:|BREAKING[ -]CHANGE)' <<<"$BODIES"; then
               BUMP="major"
-            elif git log --format='%s' "$RANGE" | grep -qiE '^feat(\(.+\))?:'; then
+            elif grep -qiE '^feat(\(.+\))?:' <<<"$SUBJECTS"; then
               BUMP="minor"
-            elif git log --format='%s' "$RANGE" | grep -qiE '^(fix|perf|hotfix)(\(.+\))?:'; then
+            elif grep -qiE '^(fix|perf|hotfix)(\(.+\))?:' <<<"$SUBJECTS"; then
               BUMP="patch"
             fi
+            echo "version: LAST_TAG=${LAST_TAG} commits_no_range=${RANGE_COUNT} BUMP=${BUMP}"
 
             IFS=. read -r MAJOR MINOR PATCH <<< "${LAST_TAG#v}"
             case "$BUMP" in
