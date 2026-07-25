@@ -15,7 +15,7 @@ name: Reusable - Version (SemVer + tag + Release)
 #
 # Gate de release: quando nao ha commit release-worthy (feat/fix/perf/BREAKING)
 # desde a ultima tag, new_tag sai vazio => o consumidor skipa build/deploy.
-# Padrao: criaelo/wiki -> docs/operations/padrao-ci-por-ambiente.md
+# Padrao: criaelo/handbook -> docs/operations/padrao-ci-por-ambiente.md
 on:
   workflow_call:
     inputs:
