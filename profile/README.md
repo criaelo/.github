@@ -2,7 +2,7 @@
 
 Plataforma white-label multi-tenant de e-commerce para gráficas e serviços.
 
-Os serviços vivem em repositórios próprios nesta org (extração do monorepo `wilianconte/localgraf` em andamento — ver `criaelo/wiki`). A documentação durável (arquitetura, decisões, backlog, execution-log) é publicada pelo Backstage TechDocs em **[portal.criaelo.com](https://portal.criaelo.com/docs/default/component/criaelo-wiki/)** a partir de `criaelo/wiki`.
+Os serviços vivem em repositórios próprios nesta org (extração do monorepo `wilianconte/localgraf` em andamento — ver `criaelo/handbook`). A documentação durável (arquitetura, decisões, backlog, execution-log) é publicada pelo Backstage TechDocs em **[portal.criaelo.com](https://portal.criaelo.com/docs/default/component/criaelo-wiki/)** a partir de `criaelo/handbook`.
 
 ## Repositórios
 
