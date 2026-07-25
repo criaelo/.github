@@ -22,7 +22,7 @@ metadata:
     - url: https://github.com/criaelo/.github/blob/main/.github/workflows/ghcr-cleanup.yml
       title: Higiene do GHCR
       icon: github
-    - url: https://wiki.criaelo.com/operations/padrao-ci-por-ambiente/
+    - url: https://portal.criaelo.com/docs/default/component/criaelo-wiki/operations/padrao-ci-por-ambiente/
       title: Padrão de CI
       icon: docs
   tags:
@@ -53,7 +53,7 @@ metadata:
     - url: https://github.com/criaelo/.github/blob/main/.github/workflows/ghcr-cleanup.yml
       title: Workflow de higiene do registry
       icon: github
-    - url: https://wiki.criaelo.com/operations/padrao-ci-por-ambiente/
+    - url: https://portal.criaelo.com/docs/default/component/criaelo-wiki/operations/padrao-ci-por-ambiente/
       title: Padrão de publicação de imagens
       icon: docs
   tags:
