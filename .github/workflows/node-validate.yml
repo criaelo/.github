@@ -11,10 +11,14 @@ on:
       node-version:
         type: string
         default: "24"
+      runner:
+        description: "Runner (runs-on) do job. Ex.: criaelo-ci ou criaelo-build."
+        type: string
+        default: criaelo-ci
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

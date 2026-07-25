@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: criaelo-ci
     steps:
       - name: Verifica GHCR_CLEANUP_TOKEN
         env: { TOKEN: '${{ secrets.GHCR_CLEANUP_TOKEN }}' }

@@ -16,10 +16,14 @@ on:
       dockerfile:
         type: string
         default: "./Dockerfile"
+      runner:
+        description: "Runner (runs-on) do job. Precisa de Docker: use criaelo-build."
+        type: string
+        default: criaelo-build
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
       packages: write
