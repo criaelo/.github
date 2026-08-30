@@ -40,8 +40,8 @@ on:
         default: true
     secrets:
       DEPLOY_REPO_TOKEN:
-        description: "Token com escrita/PR em criaelo/deploy."
-        required: true
+        description: "Token com escrita/PR em criaelo/deploy. Sem ele, o job registra notice e não altera GitOps."
+        required: false
     outputs:
       pr-number:
         description: "Número do PR GitOps criado/reutilizado."
@@ -63,7 +63,20 @@ jobs:
       pr-number: ${{ steps.pull_request.outputs.pr-number }}
       pr-url: ${{ steps.pull_request.outputs.pr-url }}
     steps:
+      - name: Verifica credencial GitOps
+        id: auth
+        env:
+          TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice::DEPLOY_REPO_TOKEN não disponível; atualização GitOps deverá ser feita por PR operacional."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout GitOps
+        if: steps.auth.outputs.enabled == 'true'
         uses: actions/checkout@v7
         with:
           repository: criaelo/deploy
@@ -73,6 +86,7 @@ jobs:
 
       - name: Atualiza manifest e publica branch
         id: prepare
+        if: steps.auth.outputs.enabled == 'true'
         env:
           SERVICE: ${{ inputs.service }}
           ENVIRONMENT: ${{ inputs.environment }}
