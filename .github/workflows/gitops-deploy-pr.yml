@@ -1,0 +1,187 @@
+name: Reusable - GitOps Deploy PR
+
+# Atualização GitOps padrão para serviços Criaelo.
+# O serviço consumidor informa somente ambiente, imagem e revisão; este workflow
+# faz checkout de criaelo/deploy, atualiza o manifest, cria PR e habilita auto-merge.
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Nome do serviço/imagem, ex.: shop-admin ou admin-platform."
+        type: string
+        required: true
+      environment:
+        description: "Ambiente GitOps: dev, hml ou prd."
+        type: string
+        required: true
+      image-ref:
+        description: "Referência completa da imagem, por tag ou digest."
+        type: string
+        required: true
+      revision:
+        description: "SHA git completo do artefato/frontend, quando aplicável."
+        type: string
+        default: ""
+      update-frontend-version:
+        description: "Atualiza labels/annotation de frontend-version no manifest."
+        type: boolean
+        default: false
+      manifest-path:
+        description: "Override do manifest no repo deploy; vazio usa a convenção padrão."
+        type: string
+        default: ""
+      runner:
+        description: "Runner usado para o job GitOps."
+        type: string
+        default: criaelo-ci
+      auto-merge:
+        description: "Habilita auto-merge depois dos checks obrigatórios do deploy."
+        type: boolean
+        default: true
+    secrets:
+      DEPLOY_REPO_TOKEN:
+        description: "Token com escrita/PR em criaelo/deploy."
+        required: true
+    outputs:
+      pr-number:
+        description: "Número do PR GitOps criado/reutilizado."
+        value: ${{ jobs.gitops.outputs.pr-number }}
+      pr-url:
+        description: "URL do PR GitOps criado/reutilizado."
+        value: ${{ jobs.gitops.outputs.pr-url }}
+      changed:
+        description: "true quando o manifest precisou ser alterado."
+        value: ${{ jobs.gitops.outputs.changed }}
+
+jobs:
+  gitops:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      pr-number: ${{ steps.pull_request.outputs.pr-number }}
+      pr-url: ${{ steps.pull_request.outputs.pr-url }}
+    steps:
+      - name: Checkout GitOps
+        uses: actions/checkout@v7
+        with:
+          repository: criaelo/deploy
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          ref: main
+          path: deploy
+
+      - name: Atualiza manifest e publica branch
+        id: prepare
+        env:
+          SERVICE: ${{ inputs.service }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          IMAGE_REF: ${{ inputs.image-ref }}
+          REVISION: ${{ inputs.revision }}
+          UPDATE_FRONTEND_VERSION: ${{ inputs.update-frontend-version }}
+          MANIFEST_PATH: ${{ inputs.manifest-path }}
+        run: |
+          set -euo pipefail
+
+          case "$ENVIRONMENT" in
+            dev|hml|prd) ;;
+            *) echo "::error::environment inválido: $ENVIRONMENT"; exit 1 ;;
+          esac
+
+          args=(
+            --service "$SERVICE"
+            --environment "$ENVIRONMENT"
+            --image-ref "$IMAGE_REF"
+          )
+          if [ -n "$REVISION" ]; then
+            args+=(--revision "$REVISION")
+          fi
+          if [ "$UPDATE_FRONTEND_VERSION" = "true" ]; then
+            args+=(--update-frontend-version)
+          fi
+          if [ -n "$MANIFEST_PATH" ]; then
+            args+=(--manifest "$MANIFEST_PATH")
+          fi
+
+          python3 deploy/scripts/update-app-image.py "${args[@]}" | tee "$RUNNER_TEMP/gitops-update.out"
+          grep -E '^(manifest|changed|image_ref|revision)=' "$RUNNER_TEMP/gitops-update.out" >> "$GITHUB_OUTPUT"
+
+          changed="$(grep '^changed=' "$RUNNER_TEMP/gitops-update.out" | cut -d= -f2)"
+          if [ "$changed" != "true" ]; then
+            echo "Manifest já está no estado desejado; nenhum PR necessário."
+            exit 0
+          fi
+
+          cd deploy
+          branch="automation/${SERVICE}-${ENVIRONMENT}-${GITHUB_SHA}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add -A
+          git diff --cached --check
+          git commit -m "chore(${SERVICE}): bump ${ENVIRONMENT} -> ${IMAGE_REF}"
+          git push --force --set-upstream origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Abre PR GitOps e habilita auto-merge
+        id: pull_request
+        if: steps.prepare.outputs.changed == 'true'
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          script: |
+            const owner = 'criaelo';
+            const repo = 'deploy';
+            const head = '${{ steps.prepare.outputs.branch }}';
+            const service = '${{ inputs.service }}';
+            const environment = '${{ inputs.environment }}';
+            const imageRef = '${{ inputs.image-ref }}';
+            const revision = '${{ inputs.revision }}';
+            const title = `chore(${service}): deploy ${environment}`;
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              base: 'main',
+              head: `${owner}:${head}`,
+              state: 'open',
+            });
+
+            let pr = existing.data[0];
+            if (!pr) {
+              const body = [
+                `Atualização GitOps automática de **${service}** em **${environment}**.`,
+                '',
+                `- Imagem: \`${imageRef}\``,
+                revision ? `- Revisão: \`${revision}\`` : '',
+                '',
+                'O merge continua condicionado aos checks obrigatórios do repositório `criaelo/deploy`.',
+              ].filter(Boolean).join('\n');
+
+              pr = (await github.rest.pulls.create({
+                owner,
+                repo,
+                base: 'main',
+                head,
+                title,
+                body,
+              })).data;
+            }
+
+            core.setOutput('pr-number', String(pr.number));
+            core.setOutput('pr-url', pr.html_url);
+
+            if (${{ inputs.auto-merge }}) {
+              try {
+                await github.graphql(`
+                  mutation($id: ID!) {
+                    enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE }) {
+                      pullRequest { number }
+                    }
+                  }
+                `, { id: pr.node_id });
+                core.notice(`PR GitOps #${pr.number} com auto-merge habilitado.`);
+              } catch (error) {
+                core.warning(`PR GitOps #${pr.number} criado; auto-merge não habilitado: ${error.message}`);
+              }
+            }
