@@ -17,9 +17,9 @@ on:
         type: string
         default: "./Dockerfile"
       runner:
-        description: "Runner (runs-on) do job. Precisa de Docker: use criaelo-build."
+        description: "Runner (runs-on) do job. GitHub-hosted por padrão; use criaelo-build como fallback/caso especial."
         type: string
-        default: criaelo-build
+        default: ubuntu-latest
 
 jobs:
   build:
