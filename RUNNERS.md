@@ -43,6 +43,19 @@ CRIAELO_RUNNER_BUILD=criaelo-build
 
 Jobs com requisito permanente de rede interna devem continuar declarando diretamente `runs-on: criaelo-ci` (ou um label self-hosted específico), sem depender da variável de contingência.
 
+## Estado operacional validado — 2026-08-31
+
+A migração foi concluída nas branches de desenvolvimento efetivas. Auditoria após a migração:
+
+- 25 repositórios ativos verificados;
+- 70 workflows verificados nas branches operacionais (`dev` quando existe, senão a default);
+- 1 referência self-hosted explícita restante: `shop-api/.github/workflows/refresh-db-hml.yml`, mantida em `criaelo-ci` porque acessa PostgreSQL interno real;
+- Backstage validado em `ubuntu-latest` com Playwright/Chrome, E2E, testes, build backend, Docker Buildx/GHCR e GitOps;
+- APIs com PostgreSQL descartável em `services:` validadas em GitHub-hosted;
+- promoção GitOps cross-repo centralizada em `criaelo/deploy/.github/workflows/promote-service.yml`, acionada por GitHub App com `Actions: write`.
+
+Branches `hml`/`main` que ainda carreguem cópias antigas de workflows devem receber a mudança pelo fluxo normal de promoção do produto, sem commits administrativos que burlem `dev → hml → main`.
+
 ## Migração
 
 Prioridade de migração:
