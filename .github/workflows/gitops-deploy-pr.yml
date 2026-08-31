@@ -31,9 +31,9 @@ on:
         type: string
         default: ""
       runner:
-        description: "Runner usado para o job GitOps."
+        description: "Runner usado para o job GitOps. GitHub-hosted por padrão; use criaelo-ci como fallback."
         type: string
-        default: criaelo-ci
+        default: ubuntu-latest
       auto-merge:
         description: "Habilita auto-merge depois dos checks obrigatórios do deploy."
         type: boolean

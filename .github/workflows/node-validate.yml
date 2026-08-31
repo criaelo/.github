@@ -12,9 +12,9 @@ on:
         type: string
         default: "24"
       runner:
-        description: "Runner (runs-on) do job. Ex.: criaelo-ci ou criaelo-build."
+        description: "Runner (runs-on) do job. GitHub-hosted por padrão; use criaelo-ci como fallback."
         type: string
-        default: criaelo-ci
+        default: ubuntu-latest
 
 jobs:
   validate:
