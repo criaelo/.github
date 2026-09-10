@@ -38,6 +38,14 @@ on:
         description: "Habilita auto-merge depois dos checks obrigatórios do deploy."
         type: boolean
         default: true
+      merge-watch-minutes:
+        description: "Tempo máximo aguardando o merge do PR GitOps, atualizando a branch sempre que ela ficar para trás. 0 desliga a vigilância."
+        type: number
+        default: 20
+      fail-on-merge-timeout:
+        description: "Falha o job se o PR GitOps não mergear dentro de merge-watch-minutes. Por padrão apenas registra warning."
+        type: boolean
+        default: false
     secrets:
       DEPLOY_REPO_TOKEN:
         description: "Token com escrita/PR em criaelo/deploy. Sem ele, o job registra notice e não altera GitOps."
@@ -198,4 +206,119 @@ jobs:
               } catch (error) {
                 core.warning(`PR GitOps #${pr.number} criado; auto-merge não habilitado: ${error.message}`);
               }
+            }
+
+      # O auto-merge do GitHub NÃO atualiza a branch sozinho. Como criaelo/deploy exige
+      # branch atualizada (required_status_checks.strict: true) e recebe merges frequentes,
+      # todo PR que perde a corrida fica BEHIND e trava para sempre — com os checks verdes.
+      # Este passo fecha essa lacuna: acompanha o PR e faz update-branch a cada vez que ele
+      # fica para trás, até mergear.
+      - name: Acompanha merge e atualiza branch quando ficar para trás
+        if: >-
+          steps.prepare.outputs.changed == 'true' &&
+          inputs.auto-merge &&
+          inputs.merge-watch-minutes > 0
+        uses: actions/github-script@v9
+        env:
+          WATCH_MINUTES: ${{ inputs.merge-watch-minutes }}
+          FAIL_ON_TIMEOUT: ${{ inputs.fail-on-merge-timeout }}
+          PR_NUMBER: ${{ steps.pull_request.outputs.pr-number }}
+        with:
+          github-token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          script: |
+            const owner = 'criaelo';
+            const repo = 'deploy';
+            const number = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(number) || number <= 0) {
+              core.warning('Número do PR GitOps indisponível; vigilância de merge ignorada.');
+              return;
+            }
+            const deadline = Date.now() + Number(process.env.WATCH_MINUTES) * 60_000;
+            const failOnTimeout = process.env.FAIL_ON_TIMEOUT === 'true';
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+            const query = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    state
+                    mergeable
+                    mergeStateStatus
+                    headRefOid
+                    url
+                  }
+                }
+              }
+            `;
+
+            // Cada update-branch gera um commit de merge e redispara os checks obrigatórios.
+            // Dois freios evitam desperdício quando o PR está travado por outro motivo:
+            // não repetir o mesmo head (a atualização anterior ainda não propagou) e um teto absoluto.
+            const MAX_UPDATES = 10;
+            let lastUpdatedOid = '';
+            let updates = 0;
+            let last = '';
+
+            while (Date.now() < deadline) {
+              const result = await github.graphql(query, { owner, repo, number });
+              const pr = result.repository.pullRequest;
+              const status = `${pr.state}/${pr.mergeStateStatus}`;
+
+              if (status !== last) {
+                core.info(`PR #${number}: ${status}`);
+                last = status;
+              }
+
+              if (pr.state === 'MERGED') {
+                core.notice(`PR GitOps #${number} mergeado${updates ? ` após ${updates} atualização(ões) de branch` : ''}.`);
+                return;
+              }
+
+              if (pr.state === 'CLOSED') {
+                core.warning(`PR GitOps #${number} foi fechado sem merge: ${pr.url}`);
+                return;
+              }
+
+              if (pr.mergeStateStatus === 'DIRTY') {
+                core.warning(`PR GitOps #${number} está com conflito e precisa de resolução manual: ${pr.url}`);
+                return;
+              }
+
+              // BEHIND é exatamente o estado que trava indefinidamente com strict: true.
+              if (pr.mergeStateStatus === 'BEHIND' && pr.headRefOid !== lastUpdatedOid && updates < MAX_UPDATES) {
+                try {
+                  // expected_head_sha é obrigatório; evita atualizar uma branch que já mudou.
+                  await github.rest.pulls.updateBranch({
+                    owner,
+                    repo,
+                    pull_number: number,
+                    expected_head_sha: pr.headRefOid,
+                  });
+                  lastUpdatedOid = pr.headRefOid;
+                  updates += 1;
+                  core.info(`Branch do PR #${number} atualizada (${updates}/${MAX_UPDATES}).`);
+                  if (updates === MAX_UPDATES) {
+                    core.warning(`PR GitOps #${number} atingiu ${MAX_UPDATES} atualizações de branch; parando de atualizar para não redisparar checks em laço.`);
+                  }
+                } catch (error) {
+                  // 422 = outro merge chegou primeiro; a próxima volta do laço relê o estado.
+                  core.info(`update-branch não aplicado agora (${error.status || '?'}): ${error.message}`);
+                }
+              }
+
+              // Jitter reduz a chance de dois serviços tentarem atualizar no mesmo instante.
+              await sleep(15_000 + Math.floor(Math.random() * 5_000));
+            }
+
+            const message =
+              `PR GitOps #${number} não mergeou em ${process.env.WATCH_MINUTES} min e pode estar travado. ` +
+              `A imagem NÃO chegou ao cluster. Verifique: https://github.com/${owner}/${repo}/pull/${number}`;
+            await core.summary
+              .addHeading('Deploy GitOps não concluído', 3)
+              .addRaw(message)
+              .write();
+            if (failOnTimeout) {
+              core.setFailed(message);
+            } else {
+              core.warning(message);
             }
