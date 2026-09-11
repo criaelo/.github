@@ -117,7 +117,11 @@ jobs:
             }
 
             // Token unico deste run de CI; vira parte do run-name no criaelo/deploy.
-            const correlationId = `${context.repo.owner}/${context.repo.repo}@${context.runId}.${context.runAttempt}`;
+            // GITHUB_RUN_ATTEMPT vem do ambiente: o objeto `context` do github-script
+            // nao expoe runAttempt. Sem ele, um re-run reusaria a chave da tentativa
+            // anterior e o polling casaria com o run de promocao antigo.
+            const runAttempt = process.env.GITHUB_RUN_ATTEMPT || '1';
+            const correlationId = `${context.repo.owner}/${context.repo.repo}@${context.runId}.${runAttempt}`;
             const sourceRunUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             // Janela de busca com folga, para tolerar diferenca de relogio.
