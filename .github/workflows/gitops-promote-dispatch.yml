@@ -1,0 +1,210 @@
+name: Reusable - GitOps promote via App dispatch
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Servico/imagem Criaelo (ex.: shop-frontend)"
+        type: string
+        required: true
+      environment:
+        description: "Ambiente GitOps: dev, hml ou prd"
+        type: string
+        required: true
+      image-ref:
+        description: "Referencia completa da imagem, por tag ou digest"
+        type: string
+        required: true
+      revision:
+        description: "SHA git completo, quando aplicavel"
+        type: string
+        required: false
+        default: ""
+      update-frontend-version:
+        description: "Atualiza frontend-version no manifest"
+        type: boolean
+        required: false
+        default: false
+      manifest-path:
+        description: "Override do manifest; vazio usa a convencao padrao"
+        type: string
+        required: false
+        default: ""
+      runner:
+        description: "Runner; vazio usa a var de org CRIAELO_RUNNER_CI"
+        type: string
+        required: false
+        default: ""
+      poll-timeout-minutes:
+        description: "Tempo maximo aguardando a promocao concluir no criaelo/deploy"
+        type: number
+        required: false
+        default: 20
+      fail-on-timeout:
+        description: "Falha o job se a promocao nao concluir dentro da janela"
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      GITOPS_APP_PRIVATE_KEY:
+        required: true
+    outputs:
+      promote-run-id:
+        description: "ID do run de promote-service correlacionado"
+        value: ${{ jobs.promote.outputs.promote-run-id }}
+      promote-run-url:
+        description: "URL do run de promote-service correlacionado"
+        value: ${{ jobs.promote.outputs.promote-run-url }}
+      promote-conclusion:
+        description: "Conclusao do run de promote-service"
+        value: ${{ jobs.promote.outputs.promote-conclusion }}
+
+permissions: {}
+
+jobs:
+  promote:
+    runs-on: ${{ inputs.runner != '' && inputs.runner || vars.CRIAELO_RUNNER_CI || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    outputs:
+      promote-run-id: ${{ steps.promote.outputs.run-id }}
+      promote-run-url: ${{ steps.promote.outputs.run-url }}
+      promote-conclusion: ${{ steps.promote.outputs.conclusion }}
+    steps:
+      - id: app-token
+        name: Gera token restrito ao criaelo/deploy
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.GITOPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: criaelo
+          repositories: deploy
+          permission-actions: write
+
+      - id: promote
+        name: Dispara promocao e aguarda conclusao no criaelo/deploy
+        uses: actions/github-script@v8
+        env:
+          SERVICE: ${{ inputs.service }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          IMAGE_REF: ${{ inputs.image-ref }}
+          REVISION: ${{ inputs.revision }}
+          UPDATE_FRONTEND_VERSION: ${{ inputs.update-frontend-version }}
+          MANIFEST_PATH: ${{ inputs.manifest-path }}
+          POLL_TIMEOUT_MINUTES: ${{ inputs.poll-timeout-minutes }}
+          FAIL_ON_TIMEOUT: ${{ inputs.fail-on-timeout }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const OWNER = 'criaelo';
+            const REPO = 'deploy';
+            const WORKFLOW = 'promote-service.yml';
+
+            const service = process.env.SERVICE;
+            const environment = process.env.ENVIRONMENT;
+            const imageRef = process.env.IMAGE_REF;
+
+            if (!/^[a-z0-9][a-z0-9-]*$/.test(service)) {
+              core.setFailed(`service invalido: ${service}`);
+              return;
+            }
+            if (!['dev', 'hml', 'prd'].includes(environment)) {
+              core.setFailed(`environment invalido: ${environment}`);
+              return;
+            }
+            if (!imageRef.startsWith('ghcr.io/criaelo/')) {
+              core.setFailed(`image_ref deve apontar para ghcr.io/criaelo/*: ${imageRef}`);
+              return;
+            }
+
+            // Token unico deste run de CI; vira parte do run-name no criaelo/deploy.
+            const correlationId = `${context.repo.owner}/${context.repo.repo}@${context.runId}.${context.runAttempt}`;
+            const sourceRunUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Janela de busca com folga, para tolerar diferenca de relogio.
+            const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: OWNER,
+              repo: REPO,
+              workflow_id: WORKFLOW,
+              ref: 'main',
+              inputs: {
+                service,
+                environment,
+                image_ref: imageRef,
+                revision: process.env.REVISION || '',
+                update_frontend_version: String(process.env.UPDATE_FRONTEND_VERSION === 'true'),
+                manifest_path: process.env.MANIFEST_PATH || '',
+                source_run_url: sourceRunUrl,
+                correlation_id: correlationId,
+              },
+            });
+            core.info(`Dispatch enviado. correlation_id=${correlationId}`);
+
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const deadline = Date.now() + Number(process.env.POLL_TIMEOUT_MINUTES) * 60 * 1000;
+            const failOnTimeout = process.env.FAIL_ON_TIMEOUT === 'true';
+            const needle = `[${correlationId}]`;
+
+            // Fase 1: localizar o run que este dispatch criou.
+            let run = null;
+            while (Date.now() < deadline && !run) {
+              await sleep(5000);
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner: OWNER,
+                repo: REPO,
+                workflow_id: WORKFLOW,
+                event: 'workflow_dispatch',
+                created: `>=${since}`,
+                per_page: 100,
+              });
+              run = data.workflow_runs.find((r) => (r.display_title || '').includes(needle)) || null;
+              if (!run) core.info('Aguardando o run de promocao aparecer...');
+            }
+
+            if (!run) {
+              const msg = `Dispatch aceito, mas nenhum run de ${WORKFLOW} com ${needle} apareceu em ${process.env.POLL_TIMEOUT_MINUTES} min. ` +
+                `A imagem ${imageRef} foi publicada e o manifesto pode NAO ter sido atualizado.`;
+              if (failOnTimeout) { core.setFailed(msg); } else { core.warning(msg); }
+              return;
+            }
+
+            core.setOutput('run-id', String(run.id));
+            core.setOutput('run-url', run.html_url);
+            core.info(`Run de promocao localizado: ${run.html_url}`);
+
+            // Fase 2: aguardar a conclusao.
+            let current = run;
+            while (Date.now() < deadline && current.status !== 'completed') {
+              await sleep(10000);
+              const { data } = await github.rest.actions.getWorkflowRun({
+                owner: OWNER, repo: REPO, run_id: run.id,
+              });
+              current = data;
+              core.info(`status=${current.status} conclusion=${current.conclusion ?? '-'}`);
+            }
+
+            core.setOutput('conclusion', current.conclusion ?? current.status);
+
+            await core.summary
+              .addHeading('Promocao GitOps', 3)
+              .addTable([
+                [{ data: 'Campo', header: true }, { data: 'Valor', header: true }],
+                ['Servico', service],
+                ['Ambiente', environment],
+                ['Imagem', imageRef],
+                ['Run de promocao', `<a href="${current.html_url}">${current.id}</a>`],
+                ['Status', `${current.status} / ${current.conclusion ?? '-'}`],
+              ])
+              .write();
+
+            if (current.status !== 'completed') {
+              const msg = `Promocao ${service} -> ${environment} nao concluiu em ${process.env.POLL_TIMEOUT_MINUTES} min: ${current.html_url}`;
+              if (failOnTimeout) { core.setFailed(msg); } else { core.warning(msg); }
+              return;
+            }
+            if (current.conclusion !== 'success') {
+              core.setFailed(`Promocao ${service} -> ${environment} terminou como ${current.conclusion}: ${current.html_url}`);
+              return;
+            }
+            core.notice(`Promocao ${service} -> ${environment} concluida: ${current.html_url}`);
