@@ -25,6 +25,12 @@ jobs:
 
 Para builds Docker, use `CRIAELO_RUNNER_BUILD`; para jobs leves/GitOps, use `CRIAELO_RUNNER_CI`.
 
+## Autovalidação deste repositório
+
+O workflow `validate-workflows.yml` valida todos os reusable workflows em PR, push para `main` e execução manual, com permissões `contents: read` e runner GitHub-hosted. Ele usa `actionlint 1.7.12` e o archive oficial Linux amd64 validado por SHA-256 fixo. As duas exceções de diagnóstico ficam restritas à metadata defasada de `actions/create-github-app-token@v3` (`app-id`/`client-id`), confirmada no `action.yml` oficial; demais erros permanecem bloqueantes **apenas para esse job**.
+
+**Preflight WP-013:** inicialmente o job não é required check; só solicitar proteção de branch após a execução de PR-canário, elegibilidade de revisor independente, verificação de bots/releases e autorização administrativa com rollback. Esta validação estática não comprova segurança de SCA/SAST nos consumidores nem provenance da imagem publicada.
+
 ## Variáveis de contingência
 
 A configuração recomendada no nível da organização é:
